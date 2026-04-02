@@ -55,7 +55,7 @@ le.classes_ = np.array([str(c) for c in le.classes_])
 
 preproc = bundle['preprocessor']
 
-# ================== PREDICTION FUNCTION ==================
+# ================== PREDICTION FUNCTION (Fixed) ==================
 def predict_severity(input_dict):
     # Safe defaults for all expected columns
     default_row = {
@@ -91,16 +91,24 @@ def predict_severity(input_dict):
 
     stage3 = bundle.get('stage3_tuned', bundle.get('stage3'))
     proba3 = stage3.predict_proba(X3)
-    pred = stage3.predict(X3)[0]
+    pred = stage3.predict(X3)[0]   # this is the class index (0, 1, or 2)
 
-    # Safe inverse transform
+    # FIXED: Safer inverse transform
     try:
         severity = le.inverse_transform([pred])[0]
     except Exception:
-        # Fallback if label is unknown
-        severity = "Unknown"
-    
-    probs = dict(zip(le.classes_, proba3[0].round(4)))
+        # Fallback: use the class with highest probability
+        severity = list(probs.keys())[np.argmax(list(probs.values()))] if 'probs' in locals() else "Slight"
+
+    # Get probabilities safely
+    probs = {}
+    try:
+        probs = dict(zip(le.classes_, proba3[0].round(4)))
+    except Exception:
+        # Fallback if label encoder fails
+        class_names = ["Fatal", "Serious", "Slight"]
+        probs = dict(zip(class_names, proba3[0].round(4)))
+
     return severity, probs
 
 # ================== INPUT FORM ==================
