@@ -43,12 +43,21 @@ def load_model():
     return joblib.load(MODEL_PATH)
 
 bundle = load_model()
-le = bundle['label_encoder']
+
+# Safe extraction of label encoder and classes
+le = bundle.get('label_encoder')
+if le is None or not hasattr(le, 'classes_'):
+    st.error("LabelEncoder not found in model bundle.")
+    st.stop()
+
+# Force classes to be string for safety
+le.classes_ = np.array([str(c) for c in le.classes_])
+
 preproc = bundle['preprocessor']
 
-# ================== PREDICTION FUNCTION (with safe defaults) ==================
+# ================== PREDICTION FUNCTION ==================
 def predict_severity(input_dict):
-    # Create DataFrame with all expected columns + safe defaults for missing ones
+    # Safe defaults for all expected columns
     default_row = {
         'Day_of_Week': 'Monday',
         'Junction_Control': 'Give way or uncontrolled',
@@ -66,16 +75,14 @@ def predict_severity(input_dict):
         'High_Speed': 0,
     }
     
-    # Update with user input
     default_row.update(input_dict)
-    
     input_df = pd.DataFrame([default_row])
-    
+
     # Transform
     X = preproc.transform(input_df)
     X_dense = X.toarray() if hasattr(X, 'toarray') else X
 
-    # Cascade stages
+    # Cascade prediction
     proba1 = bundle['stage1'].predict_proba(X_dense)
     X2 = np.hstack([X_dense, proba1])
 
@@ -86,11 +93,17 @@ def predict_severity(input_dict):
     proba3 = stage3.predict_proba(X3)
     pred = stage3.predict(X3)[0]
 
-    severity = le.inverse_transform([pred])[0]
+    # Safe inverse transform
+    try:
+        severity = le.inverse_transform([pred])[0]
+    except Exception:
+        # Fallback if label is unknown
+        severity = "Unknown"
+    
     probs = dict(zip(le.classes_, proba3[0].round(4)))
     return severity, probs
 
-# ================== INPUT FORM (expanded) ==================
+# ================== INPUT FORM ==================
 with st.form("input_form"):
     col1, col2 = st.columns(2)
     with col1:
@@ -137,7 +150,7 @@ if submitted:
         'Number_of_Vehicles': num_vehicles,
         'Number_of_Casualties': num_casualties,
         'High_Speed': 1 if speed >= 60 else 0,
-        'Carriageway_Hazards': 'None',   # default
+        'Carriageway_Hazards': 'None',
     }
     
     severity, probs = predict_severity(input_data)
