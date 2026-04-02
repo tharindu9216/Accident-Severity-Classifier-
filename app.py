@@ -1,35 +1,69 @@
-import streamlit as st
+import os
+import joblib
 import pandas as pd
 import numpy as np
-import joblib
+import streamlit as st
 import gdown
-import os
+import time
+from pathlib import Path
 
 st.set_page_config(page_title="Accident Severity Predictor", page_icon="🚦", layout="centered")
 st.title("🚦 Road Accident Severity Classifier")
 st.markdown("**Best Model:** Cascade Random Forest (3-stage + Tuned)")
 
-# ================== YOUR FILE ID ==================
+# ================== YOUR GOOGLE DRIVE FILE ID ==================
+# From your link: https://drive.google.com/file/d/1ivkwAA26cU4TeDsHg9TKOB3l8vGUhmCZ/view?usp=sharing
 FILE_ID = "1ivkwAA26cU4TeDsHg9TKOB3l8vGUhmCZ"
+
 MODEL_URL = f"https://drive.google.com/uc?id={FILE_ID}"
 MODEL_PATH = "artifacts/cascade_rf_model.pkl"
 
-@st.cache_resource
-def load_model():
-    if os.path.exists(MODEL_PATH):
+# ================== ROBUST DOWNLOAD FUNCTION ==================
+def ensure_model_present():
+    path = Path(MODEL_PATH)
+    if path.exists() and path.stat().st_size > 100_000:  # basic size check
         st.success("✅ Model loaded from cache")
-        return joblib.load(MODEL_PATH)
+        return True
 
     os.makedirs("artifacts", exist_ok=True)
-    st.info("📥 Downloading large model from Google Drive... (703 MB - this may take 1-2 minutes)")
+    st.info("📥 Downloading large model (~703 MB) from Google Drive... This may take 1-2 minutes on first run.")
 
     try:
-        gdown.download(MODEL_URL, MODEL_PATH, quiet=False, fuzzy=True)
-        st.success("✅ Model downloaded successfully!")
+        # Try gdown first (with fuzzy=True for Google Drive)
+        gdown.download(MODEL_URL, str(path), quiet=False, fuzzy=True)
+        
+        if path.exists() and path.stat().st_size > 100_000:
+            st.success("✅ Model downloaded successfully!")
+            return True
     except Exception as e:
-        st.error(f"❌ Download failed: {str(e)}")
-        st.stop()
+        st.warning(f"gdown failed: {e}. Trying alternative method...")
 
+    # Fallback: direct download
+    try:
+        import requests
+        st.info("Trying direct download...")
+        r = requests.get(MODEL_URL, stream=True, timeout=300)
+        if r.status_code == 200:
+            with open(path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=32768):
+                    if chunk:
+                        f.write(chunk)
+            if path.exists() and path.stat().st_size > 100_000:
+                st.success("✅ Model downloaded via direct method!")
+                return True
+    except Exception as e:
+        st.error(f"Download failed: {e}")
+
+    st.error("❌ Could not download the model. Please check the Google Drive link and sharing settings.")
+    st.stop()
+    return False
+
+# Run download check
+ensure_model_present()
+
+# Load the model
+@st.cache_resource
+def load_model():
     return joblib.load(MODEL_PATH)
 
 bundle = load_model()
